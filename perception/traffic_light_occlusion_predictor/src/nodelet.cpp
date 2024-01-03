@@ -18,7 +18,6 @@
 #include <lanelet2_extension/utility/utilities.hpp>
 #include <lanelet2_extension/visualization/visualization.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <tier4_autoware_utils/tier4_autoware_utils.hpp>
 
 #include <lanelet2_core/Exceptions.h>
 #include <lanelet2_core/geometry/Point.h>
@@ -117,7 +116,7 @@ void TrafficLightOcclusionPredictorNodelet::syncCallback(
   if (
     in_cloud_msg == nullptr || in_cam_info_msg == nullptr || in_roi_msg == nullptr ||
     in_roi_msg->rois.size() != in_signal_msg->signals.size()) {
-    occlusion_ratios.resize(in_roi_msg->rois.size(), 0);
+    occlusion_ratios.resize(out_msg.signals.size(), 0);
   } else {
     cloud_occlusion_predictor_->predict(
       in_cam_info_msg, in_roi_msg, in_cloud_msg, tf_buffer_, traffic_light_position_map_,

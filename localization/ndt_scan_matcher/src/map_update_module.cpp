@@ -28,13 +28,13 @@ MapUpdateModule::MapUpdateModule(
   std::shared_ptr<Tf2ListenerModule> tf2_listener_module, std::string map_frame,
   rclcpp::CallbackGroup::SharedPtr main_callback_group,
   std::shared_ptr<std::map<std::string, std::string>> state_ptr)
-: ndt_ptr_(ndt_ptr),
+: ndt_ptr_(std::move(ndt_ptr)),
   ndt_ptr_mutex_(ndt_ptr_mutex),
-  map_frame_(map_frame),
+  map_frame_(std::move(map_frame)),
   logger_(node->get_logger()),
   clock_(node->get_clock()),
-  tf2_listener_module_(tf2_listener_module),
-  state_ptr_(state_ptr),
+  tf2_listener_module_(std::move(tf2_listener_module)),
+  state_ptr_(std::move(state_ptr)),
   dynamic_map_loading_update_distance_(
     node->declare_parameter<double>("dynamic_map_loading_update_distance")),
   dynamic_map_loading_map_radius_(
@@ -55,12 +55,6 @@ MapUpdateModule::MapUpdateModule(
 
   pcd_loader_client_ =
     node->create_client<autoware_map_msgs::srv::GetDifferentialPointCloudMap>("pcd_loader_service");
-  while (!pcd_loader_client_->wait_for_service(std::chrono::seconds(1)) && rclcpp::ok()) {
-    RCLCPP_INFO(
-      logger_,
-      "Waiting for pcd loader service. Check if the enable_differential_load in "
-      "pointcloud_map_loader is set `true`.");
-  }
 
   double map_update_dt = 1.0;
   auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -112,12 +106,19 @@ bool MapUpdateModule::should_update_map(const geometry_msgs::msg::Point & positi
 void MapUpdateModule::update_map(const geometry_msgs::msg::Point & position)
 {
   auto request = std::make_shared<autoware_map_msgs::srv::GetDifferentialPointCloudMap::Request>();
-  request->area.center_x = position.x;
-  request->area.center_y = position.y;
-  request->area.radius = dynamic_map_loading_map_radius_;
+  request->area.center_x = static_cast<float>(position.x);
+  request->area.center_y = static_cast<float>(position.y);
+  request->area.radius = static_cast<float>(dynamic_map_loading_map_radius_);
   request->cached_ids = ndt_ptr_->getCurrentMapIDs();
 
-  // // send a request to map_loader
+  while (!pcd_loader_client_->wait_for_service(std::chrono::seconds(1)) && rclcpp::ok()) {
+    RCLCPP_INFO(
+      logger_,
+      "Waiting for pcd loader service. Check if the enable_differential_load in "
+      "pointcloud_map_loader is set `true`.");
+  }
+
+  // send a request to map_loader
   auto result{pcd_loader_client_->async_send_request(
     request,
     [](rclcpp::Client<autoware_map_msgs::srv::GetDifferentialPointCloudMap>::SharedFuture) {})};
@@ -163,9 +164,9 @@ void MapUpdateModule::update_ndt(
   backup_ndt.createVoxelKdtree();
 
   const auto exe_end_time = std::chrono::system_clock::now();
-  const double exe_time =
-    std::chrono::duration_cast<std::chrono::microseconds>(exe_end_time - exe_start_time).count() /
-    1000.0;
+  const auto duration_micro_sec =
+    std::chrono::duration_cast<std::chrono::microseconds>(exe_end_time - exe_start_time).count();
+  const auto exe_time = static_cast<double>(duration_micro_sec) / 1000.0;
   RCLCPP_INFO(logger_, "Time duration for creating new ndt_ptr: %lf [ms]", exe_time);
 
   // swap

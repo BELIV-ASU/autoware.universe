@@ -15,10 +15,10 @@
 #ifndef NDT_SCAN_MATCHER__MAP_UPDATE_MODULE_HPP_
 #define NDT_SCAN_MATCHER__MAP_UPDATE_MODULE_HPP_
 
+#include "localization_util/tf2_listener_module.hpp"
+#include "localization_util/util_func.hpp"
 #include "ndt_scan_matcher/debug.hpp"
 #include "ndt_scan_matcher/particle.hpp"
-#include "ndt_scan_matcher/tf2_listener_module.hpp"
-#include "ndt_scan_matcher/util_func.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 #include <tier4_autoware_utils/ros/marker_helper.hpp>
@@ -63,7 +63,7 @@ private:
     const std::vector<autoware_map_msgs::msg::PointCloudMapCellWithID> & maps_to_add,
     const std::vector<std::string> & map_ids_to_remove);
   void update_map(const geometry_msgs::msg::Point & position);
-  bool should_update_map(const geometry_msgs::msg::Point & position) const;
+  [[nodiscard]] bool should_update_map(const geometry_msgs::msg::Point & position) const;
   void publish_partial_pcd_map();
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr loaded_pcd_pub_;

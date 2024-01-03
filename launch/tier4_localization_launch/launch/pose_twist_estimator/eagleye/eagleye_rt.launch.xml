@@ -8,6 +8,8 @@
 
   <arg name="enable_additional_rolling" default="false"/>
   <arg name="use_multi_antenna_mode" default="false"/>
+  
+  <arg name="eagleye_param_path" default="$(find-pkg-share autoware_launch)/config/localization/eagleye_config.param.yaml"/>
 
   <group>
     <push-ros-namespace namespace="eagleye"/>

@@ -15,62 +15,14 @@
 #define BEHAVIOR_PATH_PLANNER__UTILS__LANE_CHANGE__LANE_CHANGE_MODULE_DATA_HPP_
 
 #include "behavior_path_planner/utils/avoidance/avoidance_module_data.hpp"
-#include "lanelet2_core/geometry/Lanelet.h"
+#include "behavior_path_planner/utils/path_safety_checker/path_safety_checker_parameters.hpp"
 
-#include "autoware_auto_planning_msgs/msg/path_point_with_lane_id.hpp"
+#include <lanelet2_core/primitives/Lanelet.h>
 
-#include <memory>
-#include <string>
-#include <utility>
 #include <vector>
 
 namespace behavior_path_planner
 {
-
-struct PoseWithVelocity
-{
-  Pose pose;
-  double velocity;
-
-  PoseWithVelocity(const Pose & pose, const double velocity) : pose(pose), velocity(velocity) {}
-};
-
-struct PoseWithVelocityStamped : public PoseWithVelocity
-{
-  double time;
-
-  PoseWithVelocityStamped(const double time, const Pose & pose, const double velocity)
-  : PoseWithVelocity(pose, velocity), time(time)
-  {
-  }
-};
-
-struct PoseWithVelocityAndPolygonStamped : public PoseWithVelocityStamped
-{
-  Polygon2d poly;
-
-  PoseWithVelocityAndPolygonStamped(
-    const double time, const Pose & pose, const double velocity, const Polygon2d & poly)
-  : PoseWithVelocityStamped(time, pose, velocity), poly(poly)
-  {
-  }
-};
-
-struct PredictedPathWithPolygon
-{
-  float confidence;
-  std::vector<PoseWithVelocityAndPolygonStamped> path;
-};
-
-struct ExtendedPredictedObject
-{
-  unique_identifier_msgs::msg::UUID uuid;
-  geometry_msgs::msg::PoseWithCovariance initial_pose;
-  geometry_msgs::msg::TwistWithCovariance initial_twist;
-  geometry_msgs::msg::AccelWithCovariance initial_acceleration;
-  autoware_auto_perception_msgs::msg::Shape shape;
-  std::vector<PredictedPathWithPolygon> predicted_paths;
-};
 
 struct LaneChangeCancelParameters
 {
@@ -107,19 +59,28 @@ struct LaneChangeParameters
   bool check_objects_on_current_lanes{true};
   bool check_objects_on_other_lanes{true};
   bool use_all_predicted_path{false};
+  double lane_expansion_left_offset{0.0};
+  double lane_expansion_right_offset{0.0};
 
-  // true by default
-  bool check_car{true};         // check object car
-  bool check_truck{true};       // check object truck
-  bool check_bus{true};         // check object bus
-  bool check_trailer{true};     // check object trailer
-  bool check_unknown{true};     // check object unknown
-  bool check_bicycle{true};     // check object bicycle
-  bool check_motorcycle{true};  // check object motorbike
-  bool check_pedestrian{true};  // check object pedestrian
+  // regulatory elements
+  bool regulate_on_crosswalk{false};
+  bool regulate_on_intersection{false};
+
+  // ego vehicle stuck detection
+  double stop_velocity_threshold{0.1};
+  double stop_time_threshold{3.0};
+
+  // true by default for all objects
+  utils::path_safety_checker::ObjectTypesToCheck object_types_to_check;
+
+  // safety check
+  bool allow_loose_check_for_cancel{true};
+  utils::path_safety_checker::RSSparams rss_params{};
+  utils::path_safety_checker::RSSparams rss_params_for_abort{};
+  utils::path_safety_checker::RSSparams rss_params_for_stuck{};
 
   // abort
-  LaneChangeCancelParameters cancel;
+  LaneChangeCancelParameters cancel{};
 
   double finish_judge_lateral_threshold{0.2};
 
@@ -175,9 +136,9 @@ struct LaneChangeTargetObjectIndices
 
 struct LaneChangeTargetObjects
 {
-  std::vector<ExtendedPredictedObject> current_lane{};
-  std::vector<ExtendedPredictedObject> target_lane{};
-  std::vector<ExtendedPredictedObject> other_lane{};
+  std::vector<utils::path_safety_checker::ExtendedPredictedObject> current_lane{};
+  std::vector<utils::path_safety_checker::ExtendedPredictedObject> target_lane{};
+  std::vector<utils::path_safety_checker::ExtendedPredictedObject> other_lane{};
 };
 
 enum class LaneChangeModuleType {
@@ -188,9 +149,6 @@ enum class LaneChangeModuleType {
 
 struct AvoidanceByLCParameters : public AvoidanceParameters
 {
-  // execute if the target object number is larger than this param.
-  size_t execute_object_num{1};
-
   // execute only when the target object longitudinal distance is larger than this param.
   double execute_object_longitudinal_margin{0.0};
 

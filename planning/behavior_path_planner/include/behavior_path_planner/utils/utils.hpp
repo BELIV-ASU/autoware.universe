@@ -16,15 +16,11 @@
 #define BEHAVIOR_PATH_PLANNER__UTILS__UTILS_HPP_
 
 #include "behavior_path_planner/data_manager.hpp"
-#include "behavior_path_planner/marker_utils/utils.hpp"
-#include "behavior_path_planner/utils/lane_change/lane_change_module_data.hpp"
-#include "behavior_path_planner/utils/lane_following/module_data.hpp"
-#include "behavior_path_planner/utils/start_planner/pull_out_path.hpp"
-#include "motion_utils/motion_utils.hpp"
-#include "object_recognition_utils/predicted_path_utils.hpp"
+#include "behavior_path_planner/utils/path_safety_checker/path_safety_checker_parameters.hpp"
+#include "motion_utils/trajectory/trajectory.hpp"
 
 #include <route_handler/route_handler.hpp>
-#include <tier4_autoware_utils/tier4_autoware_utils.hpp>
+#include <tier4_autoware_utils/geometry/boost_geometry.hpp>
 
 #include <autoware_auto_perception_msgs/msg/object_classification.hpp>
 #include <autoware_auto_perception_msgs/msg/predicted_object.hpp>
@@ -37,8 +33,7 @@
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
 
-#include <lanelet2_core/geometry/Lanelet.h>
-#include <lanelet2_routing/RoutingGraphContainer.h>
+#include <lanelet2_core/Forward.h>
 #include <tf2/utils.h>
 
 #ifdef ROS_DISTRO_GALACTIC
@@ -50,8 +45,6 @@
 #include <limits>
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace behavior_path_planner::utils
@@ -65,11 +58,19 @@ using autoware_auto_perception_msgs::msg::Shape;
 using autoware_auto_planning_msgs::msg::Path;
 using autoware_auto_planning_msgs::msg::PathPointWithLaneId;
 using autoware_auto_planning_msgs::msg::PathWithLaneId;
+using drivable_area_expansion::DrivableAreaExpansionParameters;
 using geometry_msgs::msg::Point;
 using geometry_msgs::msg::Pose;
 using geometry_msgs::msg::PoseArray;
 using geometry_msgs::msg::Twist;
 using geometry_msgs::msg::Vector3;
+using path_safety_checker::ExtendedPredictedObject;
+using path_safety_checker::ObjectTypesToCheck;
+using path_safety_checker::PoseWithVelocityAndPolygonStamped;
+using path_safety_checker::PoseWithVelocityStamped;
+using path_safety_checker::PredictedPathWithPolygon;
+using path_safety_checker::SafetyCheckParams;
+using path_safety_checker::TargetObjectsOnLane;
 using route_handler::RouteHandler;
 using tier4_autoware_utils::LinearRing2d;
 using tier4_autoware_utils::LineString2d;
@@ -155,6 +156,16 @@ double getDistanceBetweenPredictedPathAndObject(
   const double end_time, const double resolution);
 
 /**
+ * @brief Check collision between ego path footprints with extra longitudinal stopping margin and
+ * objects.
+ * @return Has collision or not
+ */
+bool checkCollisionWithExtraStoppingMargin(
+  const PathWithLaneId & ego_path, const PredictedObjects & dynamic_objects,
+  const double base_to_front, const double base_to_rear, const double width,
+  const double maximum_deceleration, const double margin, const double max_stopping_margin);
+
+/**
  * @brief Check collision between ego path footprints and objects.
  * @return Has collision or not
  */
@@ -193,27 +204,6 @@ double calcLongitudinalDistanceFromEgoToObjects(
   const Pose & ego_pose, double base_link2front, double base_link2rear,
   const PredictedObjects & dynamic_objects);
 
-/**
- * @brief Separate index of the obstacles into two part based on whether the object is within
- * lanelet.
- * @return Indices of objects pair. first objects are in the lanelet, and second others are out of
- * lanelet.
- */
-std::pair<std::vector<size_t>, std::vector<size_t>> separateObjectIndicesByLanelets(
-  const PredictedObjects & objects, const lanelet::ConstLanelets & target_lanelets);
-
-/**
- * @brief Separate the objects into two part based on whether the object is within lanelet.
- * @return Objects pair. first objects are in the lanelet, and second others are out of lanelet.
- */
-std::pair<PredictedObjects, PredictedObjects> separateObjectsByLanelets(
-  const PredictedObjects & objects, const lanelet::ConstLanelets & target_lanelets);
-
-PredictedObjects filterObjectsByVelocity(const PredictedObjects & objects, double lim_v);
-
-PredictedObjects filterObjectsByVelocity(
-  const PredictedObjects & objects, double min_v, double max_v);
-
 // drivable area generation
 lanelet::ConstLanelets transformToLanelets(const DrivableLanes & drivable_lanes);
 lanelet::ConstLanelets transformToLanelets(const std::vector<DrivableLanes> & drivable_lanes);
@@ -224,11 +214,23 @@ boost::optional<lanelet::ConstLanelet> getLeftLanelet(
 std::vector<DrivableLanes> generateDrivableLanes(const lanelet::ConstLanelets & current_lanes);
 std::vector<DrivableLanes> generateDrivableLanesWithShoulderLanes(
   const lanelet::ConstLanelets & current_lanes, const lanelet::ConstLanelets & shoulder_lanes);
+std::vector<DrivableLanes> getNonOverlappingExpandedLanes(
+  PathWithLaneId & path, const std::vector<DrivableLanes> & lanes,
+  const DrivableAreaExpansionParameters & parameters);
 std::vector<geometry_msgs::msg::Point> calcBound(
   const std::shared_ptr<RouteHandler> route_handler,
   const std::vector<DrivableLanes> & drivable_lanes,
   const bool enable_expanding_hatched_road_markings, const bool enable_expanding_intersection_areas,
   const bool is_left);
+
+std::vector<lanelet::ConstPoint3d> getBoundWithHatchedRoadMarkings(
+  const std::vector<lanelet::ConstPoint3d> & original_bound,
+  const std::shared_ptr<RouteHandler> & route_handler);
+
+std::vector<lanelet::ConstPoint3d> getBoundWithIntersectionAreas(
+  const std::vector<lanelet::ConstPoint3d> & original_bound,
+  const std::shared_ptr<RouteHandler> & route_handler,
+  const std::vector<DrivableLanes> & drivable_lanes, const bool is_left);
 
 boost::optional<size_t> getOverlappedLaneletId(const std::vector<DrivableLanes> & lanes);
 std::vector<DrivableLanes> cutOverlappedLanes(
@@ -321,10 +323,14 @@ PathPointWithLaneId insertStopPoint(const double length, PathWithLaneId & path);
 double getSignedDistanceFromBoundary(
   const lanelet::ConstLanelets & shoulder_lanelets, const Pose & pose, const bool left_side);
 std::optional<double> getSignedDistanceFromBoundary(
-  const lanelet::ConstLanelets & shoulder_lanelets, const LinearRing2d & footprint,
-  const Pose & vehicle_pose, const bool left_side);
+  const lanelet::ConstLanelets & lanelets, const double vehicle_width, const double base_link2front,
+  const double base_link2rear, const Pose & vehicle_pose, const bool left_side);
 
 // misc
+
+Polygon2d toPolygon2d(const lanelet::ConstLanelet & lanelet);
+
+Polygon2d toPolygon2d(const lanelet::BasicPolygon2d & polygon);
 
 std::vector<Polygon2d> getTargetLaneletPolygons(
   const lanelet::ConstLanelets & lanelets, const Pose & pose, const double check_length,
@@ -361,10 +367,12 @@ lanelet::ConstLanelets getCurrentLanesFromPath(
   const PathWithLaneId & path, const std::shared_ptr<const PlannerData> & planner_data);
 
 lanelet::ConstLanelets extendNextLane(
-  const std::shared_ptr<RouteHandler> route_handler, const lanelet::ConstLanelets & lanes);
+  const std::shared_ptr<RouteHandler> route_handler, const lanelet::ConstLanelets & lanes,
+  const bool only_in_route = false);
 
 lanelet::ConstLanelets extendPrevLane(
-  const std::shared_ptr<RouteHandler> route_handler, const lanelet::ConstLanelets & lanes);
+  const std::shared_ptr<RouteHandler> route_handler, const lanelet::ConstLanelets & lanes,
+  const bool only_in_route = false);
 
 lanelet::ConstLanelets extendLanes(
   const std::shared_ptr<RouteHandler> route_handler, const lanelet::ConstLanelets & lanes);
@@ -374,7 +382,7 @@ lanelet::ConstLanelets getExtendedCurrentLanes(
 
 lanelet::ConstLanelets getExtendedCurrentLanes(
   const std::shared_ptr<const PlannerData> & planner_data, const double backward_length,
-  const double forward_length);
+  const double forward_length, const bool forward_only_in_route);
 
 lanelet::ConstLanelets calcLaneAroundPose(
   const std::shared_ptr<RouteHandler> route_handler, const geometry_msgs::msg::Pose & pose,
@@ -382,14 +390,11 @@ lanelet::ConstLanelets calcLaneAroundPose(
   const double dist_threshold = std::numeric_limits<double>::max(),
   const double yaw_threshold = std::numeric_limits<double>::max());
 
-std::vector<PredictedPathWithPolygon> getPredictedPathFromObj(
-  const ExtendedPredictedObject & obj, const bool & is_use_all_predicted_path);
-
 bool checkPathRelativeAngle(const PathWithLaneId & path, const double angle_threshold);
 
 double calcMinimumLaneChangeLength(
   const BehaviorPathPlannerParameters & common_param, const std::vector<double> & shift_intervals,
-  const double length_to_intersection = 0.0);
+  const double backward_buffer, const double length_to_intersection = 0.0);
 
 lanelet::ConstLanelets getLaneletsFromPath(
   const PathWithLaneId & path, const std::shared_ptr<route_handler::RouteHandler> & route_handler);
@@ -413,6 +418,9 @@ void makeBoundLongitudinallyMonotonic(
 std::optional<lanelet::Polygon3d> getPolygonByPoint(
   const std::shared_ptr<RouteHandler> & route_handler, const lanelet::ConstPoint3d & point,
   const std::string & polygon_name);
+
+lanelet::ConstLanelets combineLanelets(
+  const lanelet::ConstLanelets & base_lanes, const lanelet::ConstLanelets & added_lanes);
 }  // namespace behavior_path_planner::utils
 
 #endif  // BEHAVIOR_PATH_PLANNER__UTILS__UTILS_HPP_
